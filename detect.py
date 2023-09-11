@@ -28,11 +28,15 @@ Usage - formats:
                                  yolov5s_paddle_model       # PaddlePaddle
 """
 
+
+# 코드입력
 import argparse
 import os
 import platform
 import sys
 from pathlib import Path
+
+import numpy as np
 
 import torch
 
@@ -74,13 +78,15 @@ def run(
         project=ROOT / 'runs/detect',  # save results to project/name
         name='exp',  # save results to project/name
         exist_ok=False,  # existing project/name ok, do not increment
-        line_thickness=3,  # bounding box thickness (pixels)
+        line_thickness=1,  # bounding box thickness (pixels)
         hide_labels=False,  # hide labels
         hide_conf=False,  # hide confidences
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
-):
+        Safe = [],
+        Warning = []
+    ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
@@ -88,6 +94,7 @@ def run(
     webcam = source.isnumeric() or source.endswith('.streams') or (is_url and not is_file)
     screenshot = source.lower().startswith('screen')
     if is_url and is_file:
+
         source = check_file(source)  # download
 
     # Directories
@@ -110,7 +117,9 @@ def run(
         dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+        view_img = check_imshow(warn=True)
     vid_path, vid_writer = [None] * bs, [None] * bs
+
 
     # Run inference
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
@@ -137,6 +146,12 @@ def run(
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
+            # green.append(int(det[4]))
+            for det_item in det.tolist():
+                if det_item[5] == 0.0:
+                    Safe.append(det_item[4])
+                if det_item[5] == 1.0:
+                    Warning.append(det_item[4])
             seen += 1
             if webcam:  # batch_size >= 1
                 p, im0, frame = path[i], im0s[i].copy(), dataset.count
@@ -167,6 +182,7 @@ def run(
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                         with open(f'{txt_path}.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                    
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
@@ -206,15 +222,23 @@ def run(
 
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
+        
 
     # Print results
     t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
     LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-        LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
+        LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}"+"\n")
+       
+        
     if update:
         strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
+    if len(Safe) != 0:  
+        print("Safe's accuracy is"+ f" {np.mean(Safe) * 100:.0f}" + "%" + "\n")
+    if len(Warning) != 0:
+        print("Warning's accuracy is"+ f" {np.mean(Warning) * 100:.0f}" + "%" + "\n")
+    
 
 
 def parse_opt():
